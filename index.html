@@ -87,6 +87,13 @@ function extractNamedBat(v,dirTpl,pattern){
  const dir=fill(dirTpl,v);
  return `@echo off\r\nsetlocal\r\nset "DIR=${dir}"\r\nset "RAR=C:\\Program Files\\WinRAR\\WinRAR.exe"\r\nif not exist "%RAR%" set "RAR=C:\\Program Files (x86)\\WinRAR\\WinRAR.exe"\r\nif not exist "%RAR%" (\r\n  echo WinRAR not found. Please install WinRAR or extract manually.\r\n  pause\r\n  goto :eof\r\n)\r\nif not exist "%DIR%" (\r\n  echo Folder not found: %DIR%\r\n  pause\r\n  goto :eof\r\n)\r\npushd "%DIR%"\r\nset "FOUND=0"\r\nfor %%f in ("${pattern}") do (\r\n  set "FOUND=1"\r\n  echo - %%~nxf\r\n  "%RAR%" x -y "%%f" ".\\"\r\n)\r\nif "%FOUND%"=="0" echo No matching file found: ${pattern}\r\npopd\r\necho Done.\r\npause\r\n`;
 }
+function b64EncodeUtf16LE(str){let bin='';for(let i=0;i<str.length;i++){const code=str.charCodeAt(i);bin+=String.fromCharCode(code&0xFF,(code>>8)&0xFF)}return btoa(bin)}
+function appendCodeBat(path,text){
+ const safeText=text.replace(/\r\n/g,'\n').replace(/\n/g,'\r\n');
+ const ps=`$path = '${path}'\r\n$dir = Split-Path $path\r\nif (!(Test-Path $dir)) { Write-Host "Folder not found: $dir"; Read-Host 'اضغط Enter للخروج'; exit }\r\n$block = "\r\n\r\n${safeText}"\r\nAdd-Content -Path $path -Value $block\r\nWrite-Host "Done: $path"\r\nRead-Host 'اضغط Enter للإغلاق'\r\n`;
+ const b64=b64EncodeUtf16LE(ps);
+ return `@echo off\r\npowershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${b64}\r\n`;
+}
 function openFileBat(v,pathTpl){
  const p=fill(pathTpl,v);
  return `@echo off\r\nif not exist "${p}" (\r\n  echo File not found: ${p}\r\n  pause\r\n  goto :eof\r\n)\r\nstart "" "${p}"\r\n`;
@@ -121,17 +128,17 @@ pause`),
       (SERVER = DEDICATED)
       (SERVICE_NAME = orcl)
     )
-  )`,'','TNSNAMES_OFFLINE'),
+  )`,'','TNSNAMES_OFFLINE','',R`{{home}}\network\admin\tnsnames.ora`),
  S('ed','عدّل sqlnet.ora','في نفس المجلد {{home}}\\network\\admin، أضف:',R`SQLNET.AUTHENTICATION_SERVICES= (NTS)
 SQLNET.ALLOWED_LOGON_VERSION_CLIENT = 8
-SQLNET.ALLOWED_LOGON_VERSION_SERVER = 8`),
+SQLNET.ALLOWED_LOGON_VERSION_SERVER = 8`,'','','',R`{{home}}\network\admin\sqlnet.ora`),
  S('ed','عدّل listener.ora','في نفس المجلد، أضف أو عدّل:',R`LISTENER =
   (DESCRIPTION_LIST =
     (DESCRIPTION =
       (ADDRESS = (PROTOCOL = TCP)(HOST = {{host}})(PORT = {{port}}))
       (ADDRESS = (PROTOCOL = IPC)(KEY = EXTPROC1521))
     )
-  )`),
+  )`,'','','',R`{{home}}\network\admin\listener.ora`),
  S('cmd','أعد تشغيل المستمع','',R`lsnrctl stop
 lsnrctl start`),
  S('chk','اختبر الاتصال','يجب أن ترى OK.',R`tnsping Yemensoft`)]},
@@ -180,7 +187,7 @@ function render(){
       (SERVER = DEDICATED)
       (SERVICE_NAME = orcl)
     )
-  )`,c.v))}</pre><div class="row"><button data-c2="${i}">نسخ كود الأوفلاين</button></div></div>`:''}${x.u?`<div class="row" style="margin-bottom:8px"><a class="dlb" href="${x.u}" target="_blank" rel="noopener">فتح رابط التنزيل</a></div>`:''}<textarea data-n="${id}" placeholder="ملاحظات">${esc(c.n[id]||'')}</textarea></div></div></div>`};
+  )`,c.v))}</pre><div class="row"><button data-c2="${i}">نسخ كود الأوفلاين</button></div></div>`:''}${x.u?`<div class="row" style="margin-bottom:8px"><a class="dlb" href="${x.u}" target="_blank" rel="noopener">فتح رابط التنزيل</a></div>`:''}${x.k==='ed'&&x.xdir?`<div class="row" style="margin-bottom:8px"><button class="p" data-af="${i}">تنزيل سكربت الإضافة التلقائية للملف</button></div>`:''}<textarea data-n="${id}" placeholder="ملاحظات">${esc(c.n[id]||'')}</textarea></div></div></div>`};
  let mh='',gi=0;
  while(gi<s.steps.length){const x=s.steps[gi];
   if(x.grp){let gj=gi,buf='';while(gj<s.steps.length&&s.steps[gj].grp===x.grp){buf+=stepHTML(s.steps[gj],gj);gj++}
@@ -205,6 +212,19 @@ document.addEventListener('click',e=>{const t=e.target.closest('button');if(!t)r
   if(!navigator.clipboard||!navigator.clipboard.readText){bad();return}
   navigator.clipboard.readText().then(x=>{const p=x.trim().split('|');if(p.length<3||!p[0]){bad();return}
    c.v.ip=p[0].trim();c.v.host=p[1].trim();c.v.user_name=p[2].trim();save();render()},bad)}
+ if(t.dataset.af!==undefined){const st=SECTIONS.find(x=>x.id===sec).steps[+t.dataset.af];const v=DB[cur].v;
+  let text=fill(st.code,v);
+  if(st.b==='TNSNAMES_OFFLINE'&&v.offline&&v.server_name){text+='\n\n'+fill(R`Yemensoft_brn =
+  (DESCRIPTION =
+    (ADDRESS = (PROTOCOL = TCP)(HOST = {{server_name}})(PORT = {{port}}))
+    (CONNECT_DATA =
+      (SERVER = DEDICATED)
+      (SERVICE_NAME = orcl)
+    )
+  )`,v)}
+  const filePath=fill(st.xdir,v);
+  const txt=appendCodeBat(filePath,text);
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'application/octet-stream'}));a.download='add-code.bat';document.body.appendChild(a);a.click();a.remove()}
  if(t.dataset.xn!==undefined){const st=SECTIONS.find(x=>x.id===sec).steps[+t.dataset.xn];const txt=extractNamedBat(DB[cur].v,st.xdir,st.xpat);const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'application/octet-stream'}));a.download='extract-step.bat';document.body.appendChild(a);a.click();a.remove()}
  if(t.dataset.of!==undefined){const st=SECTIONS.find(x=>x.id===sec).steps[+t.dataset.of];const txt=openFileBat(DB[cur].v,st.xdir);const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'application/octet-stream'}));a.download='open-setup.bat';document.body.appendChild(a);a.click();a.remove()}
  if(t.dataset.ext!==undefined){const txt=extractOnlyBat(DB[cur].v);const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'application/octet-stream'}));a.download='extract-only.bat';document.body.appendChild(a);a.click();a.remove()}
